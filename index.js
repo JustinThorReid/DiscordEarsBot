@@ -316,13 +316,13 @@ function upsertPerson(username) {
                 return;
             }
 
-            db.run("INSERT INTO person (name) VALUES (?)", [username], (err, context) => {
+            db.run("INSERT INTO person (name) VALUES (?)", [username], (err) => {
                 if (err) {
                     console.error(err);
                     exit;
                 }
 
-                resolve(context.lastID);
+                resolve(this.lastID);
             })
         })
     })
