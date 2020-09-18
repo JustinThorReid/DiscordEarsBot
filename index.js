@@ -247,8 +247,6 @@ async function google_transcribe(rawFileName) {
         content: audioBytes,
     };
     const config = {
-        encoding: 'LINEAR16',
-        sampleRateHertz: 48000,
         languageCode: 'en-US',
     };
     const request = {
@@ -257,13 +255,11 @@ async function google_transcribe(rawFileName) {
     };
 
     // Detects speech in the audio file
-    const [response] = await speechclient.recognize(request)
-    console.log(response);
-
+    const [response] = await speechclient.recognize(request);
     const transcription = response.results
         .map(result => result.alternatives[0].transcript)
         .join('\n');
-    return transcription.text;
+    return transcription;
 }
 
 function speak_impl(voice_Connection, mapKey) {
@@ -291,7 +287,7 @@ function speak_impl(voice_Connection, mapKey) {
             const stats = fs.statSync(filename);
             const fileSizeInBytes = stats.size;
             const duration = fileSizeInBytes / 48000 / 4;
-            console.log("duration: " + duration)
+            console.log("duration: " + duration);
 
             if (duration < 0.75 || duration > 19) {
                 console.log("TOO SHORT / TOO LONG; SKPPING")
@@ -300,29 +296,31 @@ function speak_impl(voice_Connection, mapKey) {
             }
 
             const newfilename = filename.replace('.tmp', '.raw');
-            fs.rename(filename, newfilename, async (err) => {
+            fs.rename(filename, newfilename, (err) => {
                 if (err) {
                     console.log('ERROR270:' + err)
                     fs.unlinkSync(filename)
                 } else {
                     let val = guildMap.get(mapKey)
                     try {
-                        const text = await google_transcribe(newfilename);
-                        if (text != null)
-                            process_commands_query(text, mapKey, user);
+                        const wavFilename = newfilename + '.wav';
+                        convert_audio(newfilename, wavFilename, async () => {
+                            const text = await google_transcribe(wavFilename);
+                            console.log(text);
+                            if (text != null)
+                                process_commands_query(text, mapKey, user);
 
-                        if (!val.debug) {
-                            fs.unlinkSync(newfilename)
-                        }
-                        // convert_audio(infile, outfile, async () => {
-                        //     let out = await transcribe_witai(outfile);
+                            if (!val.debug) {
+                                fs.unlinkSync(newfilename)
+                                fs.unlinkSync(wavFilename)
+                            }
 
-                        // })
+                        })
                     } catch (e) {
                         console.log('tmpraw rename: ' + e)
                         if (!val.debug) {
-                            fs.unlinkSync(infile)
-                            fs.unlinkSync(outfile)
+                            fs.unlinkSync(newfilename)
+                            fs.unlinkSync(wavFilename)
                         }
                     }
                 }
@@ -362,7 +360,8 @@ function upsertPerson(username) {
 function process_commands_query(txt, mapKey, user) {
     if (txt && txt.length && user.username) {
         let val = guildMap.get(mapKey);
-        val.text_Channel.send(user.username + ': ' + txt)
+        val.text_Channel.send(user.username + ': ' + txt);
+        console.log(user.username + ': ' + txt);
 
         upsertPerson(user.username).then((personID) => {
             db.run("INSERT INTO message (idPerson, msg) VALUES (?, ?)", [personID, txt]);
