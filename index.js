@@ -15,16 +15,23 @@ console.log = function () {
 const fs = require('fs');
 const util = require('util');
 const path = require('path');
+const sqlite3 = require('sqlite3');
+const db = new sqlite3.Database('conversation-log.sqlite3', (err) => {
+    if (err) {
+        console.error(`Error during database startup: ${err}`);
+        exit;
+    }
+});
 
 //////////////////////////////////////////
 ///////////////// VARIA //////////////////
 //////////////////////////////////////////
 
 function necessary_dirs() {
-    if (!fs.existsSync('./temp/')){
+    if (!fs.existsSync('./temp/')) {
         fs.mkdirSync('./temp/');
     }
-    if (!fs.existsSync('./data/')){
+    if (!fs.existsSync('./data/')) {
         fs.mkdirSync('./data/');
     }
 }
@@ -46,9 +53,9 @@ function clean_temp() {
 clean_temp(); // clean files at startup
 
 function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 
 
@@ -71,12 +78,12 @@ async function convert_audio(infile, outfile, cb) {
             .outputChannels(1)
             .outputFileType('wav');
 
-        command.on('end', function() {
+        command.on('end', function () {
             streamout.close();
             streamin.close();
             cb();
         });
-        command.on('error', function(err, stdout, stderr) {
+        command.on('error', function (err, stdout, stderr) {
             console.log('Cannot process audio: ' + err.message);
             console.log('Sox Command Stdout: ', stdout);
             console.log('Sox Command Stderr: ', stderr)
@@ -99,13 +106,11 @@ async function convert_audio(infile, outfile, cb) {
 const SETTINGS_FILE = 'settings.json';
 
 let DISCORD_TOK = null;
-let witAPIKEY = null; 
-let SPOTIFY_TOKEN_ID = null;
-let SPOTIFY_TOKEN_SECRET = null;
+let witAPIKEY = null;
 
 function loadConfig() {
-    const CFG_DATA = JSON.parse( fs.readFileSync(SETTINGS_FILE, 'utf8') );
-    
+    const CFG_DATA = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+
     DISCORD_TOK = CFG_DATA.discord_token;
     witAPIKEY = CFG_DATA.wit_ai_token;
 }
@@ -124,11 +129,11 @@ discordClient.on('ready', () => {
 discordClient.login(DISCORD_TOK)
 
 const PREFIX = '*';
-const _CMD_HELP        = PREFIX + 'help';
-const _CMD_JOIN        = PREFIX + 'join';
-const _CMD_LEAVE       = PREFIX + 'leave';
-const _CMD_DEBUG       = PREFIX + 'debug';
-const _CMD_TEST        = PREFIX + 'hello';
+const _CMD_HELP = PREFIX + 'help';
+const _CMD_JOIN = PREFIX + 'join';
+const _CMD_LEAVE = PREFIX + 'leave';
+const _CMD_DEBUG = PREFIX + 'debug';
+const _CMD_TEST = PREFIX + 'hello';
 
 const guildMap = new Map();
 
@@ -152,7 +157,7 @@ discordClient.on('message', async (msg) => {
                 if (val.voice_Channel) val.voice_Channel.leave()
                 if (val.voice_Connection) val.voice_Connection.disconnect()
                 if (val.musicYTStream) val.musicYTStream.destroy()
-                    guildMap.delete(mapKey)
+                guildMap.delete(mapKey)
                 msg.reply("Disconnected.")
             } else {
                 msg.reply("Cannot leave because not connected.")
@@ -179,10 +184,10 @@ discordClient.on('message', async (msg) => {
 
 function getHelpString() {
     let out = '**COMMANDS:**\n'
-        out += '```'
-        out += PREFIX + 'join\n';
-        out += PREFIX + 'leave\n';
-        out += '```'
+    out += '```'
+    out += PREFIX + 'join\n';
+    out += PREFIX + 'leave\n';
+    out += '```'
     return out;
 }
 
@@ -191,10 +196,10 @@ const { Readable } = require('stream');
 const SILENCE_FRAME = Buffer.from([0xF8, 0xFF, 0xFE]);
 
 class Silence extends Readable {
-  _read() {
-    this.push(SILENCE_FRAME);
-    this.destroy();
-  }
+    _read() {
+        this.push(SILENCE_FRAME);
+        this.destroy();
+    }
 }
 
 async function connect(msg, mapKey) {
@@ -217,7 +222,7 @@ async function connect(msg, mapKey) {
             'debug': false,
         });
         speak_impl(voice_Connection, mapKey)
-        voice_Connection.on('disconnect', async(e) => {
+        voice_Connection.on('disconnect', async (e) => {
             if (e) console.log(e);
             guildMap.delete(mapKey);
         })
@@ -232,9 +237,10 @@ async function connect(msg, mapKey) {
 
 function speak_impl(voice_Connection, mapKey) {
     voice_Connection.on('speaking', async (user, speaking) => {
-        if (speaking.bitfield == 0 /*|| user.bot*/) {
+        if (speaking.bitfield == 0 || user.bot) {
             return
         }
+
         console.log(`I'm listening to ${user.username}`)
 
         const filename = './temp/audio_' + mapKey + '_' + user.username.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_' + Date.now() + '.tmp';
@@ -244,10 +250,10 @@ function speak_impl(voice_Connection, mapKey) {
         const audioStream = voice_Connection.receiver.createStream(user, { mode: 'pcm' })
         audioStream.pipe(ws)
 
-        audioStream.on('error',  (e) => { 
+        audioStream.on('error', (e) => {
             console.log('audioStream: ' + e)
         });
-        ws.on('error',  (e) => { 
+        ws.on('error', (e) => {
             console.log('ws error: ' + e)
         });
         audioStream.on('end', async () => {
@@ -297,11 +303,39 @@ function speak_impl(voice_Connection, mapKey) {
     })
 }
 
+function upsertPerson(username) {
+    return new Promise((resolve) => {
+        db.get("SELECT idPerson FROM person WHERE name = ?", [username], (err, row) => {
+            if (err) {
+                console.error(err);
+                exit;
+            }
+
+            if (row) {
+                resolve(row.idPerson);
+                return;
+            }
+
+            db.run("INSERT INTO person (name) VALUES (?)", [username], (err, context) => {
+                if (err) {
+                    console.error(err);
+                    exit;
+                }
+
+                resolve(context.lastID);
+            })
+        })
+    })
+}
 
 function process_commands_query(txt, mapKey, user) {
     if (txt && txt.length) {
         let val = guildMap.get(mapKey);
         val.text_Channel.send(user.username + ': ' + txt)
+
+        upsertPerson(user.username).then((personID) => {
+            db.run("INSERT INTO message (idPerson, msg) VALUES (?, ?)", [personID, txt]);
+        });
     }
 }
 
@@ -311,11 +345,12 @@ function process_commands_query(txt, mapKey, user) {
 //////////////////////////////////////////
 let witAI_lastcallTS = null;
 const witClient = require('node-witai-speech');
+const { exit } = require('process');
 async function transcribe_witai(file) {
     try {
         // ensure we do not send more than one request per second
         if (witAI_lastcallTS != null) {
-            let now = Math.floor(new Date());    
+            let now = Math.floor(new Date());
             while (now - witAI_lastcallTS < 1000) {
                 console.log('sleep')
                 await sleep(100);
