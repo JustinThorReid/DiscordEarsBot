@@ -3,6 +3,8 @@ data/
 temp/
 screenlog*
 package-lock.json
+discord-google-creds.json
+conversation-log.sqlite3
 
 # Logs
 logs

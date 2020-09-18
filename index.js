@@ -23,6 +23,10 @@ const db = new sqlite3.Database('conversation-log.sqlite3', (err) => {
     }
 });
 
+process.env.GOOGLE_APPLICATION_CREDENTIALS = './discord-google-creds.json';
+const speech = require('@google-cloud/speech');
+const speechclient = new speech.SpeechClient();
+
 //////////////////////////////////////////
 ///////////////// VARIA //////////////////
 //////////////////////////////////////////
@@ -234,6 +238,33 @@ async function connect(msg, mapKey) {
     }
 }
 
+async function google_transcribe(rawFileName) {
+    const file = fs.readFileSync(rawFileName);
+    const audioBytes = file.toString('base64');
+
+    // The audio file's encoding, sample rate in hertz, and BCP-47 language code
+    const audio = {
+        content: audioBytes,
+    };
+    const config = {
+        encoding: 'LINEAR16',
+        sampleRateHertz: 48000,
+        languageCode: 'en-US',
+    };
+    const request = {
+        audio: audio,
+        config: config,
+    };
+
+    // Detects speech in the audio file
+    const [response] = await speechclient.recognize(request)
+    console.log(response);
+
+    const transcription = response.results
+        .map(result => result.alternatives[0].transcript)
+        .join('\n');
+    return transcription.text;
+}
 
 function speak_impl(voice_Connection, mapKey) {
     voice_Connection.on('speaking', async (user, speaking) => {
@@ -262,31 +293,31 @@ function speak_impl(voice_Connection, mapKey) {
             const duration = fileSizeInBytes / 48000 / 4;
             console.log("duration: " + duration)
 
-            if (duration < 0.5 || duration > 19) {
+            if (duration < 0.75 || duration > 19) {
                 console.log("TOO SHORT / TOO LONG; SKPPING")
                 fs.unlinkSync(filename)
                 return;
             }
 
             const newfilename = filename.replace('.tmp', '.raw');
-            fs.rename(filename, newfilename, (err) => {
+            fs.rename(filename, newfilename, async (err) => {
                 if (err) {
                     console.log('ERROR270:' + err)
                     fs.unlinkSync(filename)
                 } else {
                     let val = guildMap.get(mapKey)
-                    const infile = newfilename;
-                    const outfile = newfilename + '.wav';
                     try {
-                        convert_audio(infile, outfile, async () => {
-                            let out = await transcribe_witai(outfile);
-                            if (out != null)
-                                process_commands_query(out, mapKey, user);
-                            if (!val.debug) {
-                                fs.unlinkSync(infile)
-                                fs.unlinkSync(outfile)
-                            }
-                        })
+                        const text = await google_transcribe(newfilename);
+                        if (text != null)
+                            process_commands_query(text, mapKey, user);
+
+                        if (!val.debug) {
+                            fs.unlinkSync(newfilename)
+                        }
+                        // convert_audio(infile, outfile, async () => {
+                        //     let out = await transcribe_witai(outfile);
+
+                        // })
                     } catch (e) {
                         console.log('tmpraw rename: ' + e)
                         if (!val.debug) {
@@ -316,7 +347,7 @@ function upsertPerson(username) {
                 return;
             }
 
-            db.run("INSERT INTO person (name) VALUES (?)", [username], (err) => {
+            db.run("INSERT INTO person (name) VALUES (?)", [username], function (err) {
                 if (err) {
                     console.error(err);
                     exit;
@@ -329,7 +360,7 @@ function upsertPerson(username) {
 }
 
 function process_commands_query(txt, mapKey, user) {
-    if (txt && txt.length) {
+    if (txt && txt.length && user.username) {
         let val = guildMap.get(mapKey);
         val.text_Channel.send(user.username + ': ' + txt)
 
